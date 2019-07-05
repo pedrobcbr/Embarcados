@@ -6,8 +6,12 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <string.h>
+#include <wiringPi.h>
+#include <gtk/gtk.h>
 
 pid_t scanner;
+#define LedPin 0
+#define Rele   2
 
 void mataDsreader();
 void le_strings(char *matriz_string);
@@ -16,63 +20,94 @@ int validaCodigo(char *codigos);
 int verificaCodigo(char *codigo);
 int getPIDdsreader();
 
-// void fechaPrograma(){
-//   fclose(stdout);
-//   fprintf(stderr, "oi\n");
-//   exit(0);
-// }
+void fecha_programa(GtkWidget *wid, gpointer ptr){
+  gtk_main_quit();
+}
 
-int main(){
+void le_codigo(GtkWidget *wid, gpointer ptr){
   char codigo[10][100];
   char codigoReal[10][100];
   int sent=1;
-  FILE *arq;
-  char abacate[90];
-
-
-  signal(SIGALRM, mataDsreader);
   
-  while(sent){
-    scanner=fork();
+  signal(SIGALRM, mataDsreader);
+  scanner=fork();
 
-    if(scanner==0){
-      execl("/bin/sh","sh", "-c", "./dsreader > cadastro.txt", NULL);
-      fprintf(stderr, "Erro ao executar o dsreader...");
-      exit(-1);
+  if(scanner==0){
+    system("./dsreader > cadastro.txt");                   
+  }else{
+    while(sent){
+    
+    gtk_label_set_text(GTK_LABEL(ptr), "Posicione o código de barras/QR CODE");
+    alarm(15);
+    pause();
+    le_strings(codigo[0]);
+    extraiCodigo(codigo[0], codigoReal[0]);
+    sent=validaCodigo(codigoReal[0]);
+    if(sent){
+      gtk_label_set_text(GTK_LABEL(ptr), "Porta fechada");
+      digitalWrite(LedPin,LOW);
+      digitalWrite(Rele,LOW);
+      sleep(5);
+     
+      return;
+}
+    }
+
+    if(verificaCodigo(codigoReal[0])){
+      gtk_label_set_text(GTK_LABEL(ptr), "Porta fechada");
+      digitalWrite(LedPin,LOW);
+      digitalWrite(Rele,LOW);
+      sleep(5);
     }else{
-      printf("Posicione o código de barras/QR CODE\n");
-      alarm(5);
-      pause();
-      le_strings(codigo[0]);
-      extraiCodigo(codigo[0], codigoReal[0]);
-      sent=validaCodigo(codigoReal[0]);
-      if(sent)
-        puts("\n\n\n\nCódigo não reconhecido!!!, tente novamente...");
-      else{
-        if(verificaCodigo(codigoReal[0])){
-          puts("Porta fechada");
-        }else{
-          puts("Porta aberta");
-        }
-      }
+      gtk_label_set_text(GTK_LABEL(ptr), "Porta aberta");
+      digitalWrite(LedPin,HIGH);
+      digitalWrite(Rele,HIGH);
+	    delay(5000);
+      digitalWrite(LedPin,LOW);
+      delay(15000);
+      digitalWrite(Rele,LOW);
     }
   }
 
+  return;
+}
 
+int main(int argc, char *argv[]){
+  gtk_init(&argc, &argv);
+
+  GtkWidget *win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+  GtkWidget *btn = gtk_button_new_with_label("INICIAR");
+  GtkWidget *label = gtk_label_new("Clique em iniciar para checar o QR CODE");
+  GtkWidget *box = gtk_vbox_new(FALSE, 5);
+
+  g_signal_connect(btn, "clicked", G_CALLBACK(le_codigo), label);
+  g_signal_connect(win, "delete_event", G_CALLBACK(fecha_programa), NULL);
+  signal(SIGALRM, mataDsreader);
+  
+  wiringPiSetup();
+  pinMode(LedPin,OUTPUT);
+  pinMode(Rele,OUTPUT);
+
+  gtk_box_pack_start(GTK_BOX(box), label, TRUE, TRUE, 0);
+  gtk_box_pack_start(GTK_BOX(box), btn, TRUE, TRUE, 0);
+
+  gtk_container_add(GTK_CONTAINER(win), box);
+
+  gtk_widget_show_all(win);
+  gtk_main();
 
   return 0;
 }
+
 // Objetivo: Procedimento para fechar Dsreader quando tempo de execução acabar
 // Parâmetro:
 // Retorno:
 void mataDsreader(){
   pid_t pidDsreader;
-
-  system("ls -la");
   system("ps -a | grep dsreader > tmp.txt");
   pidDsreader=getPIDdsreader();
   kill(pidDsreader, SIGINT);
-  // kill(scanner, SIGKILL);
+  kill(scanner, SIGKILL);
   waitpid(scanner, NULL, 0);
   system("rm tmp.txt");
 }
@@ -158,7 +193,7 @@ int verificaCodigo(char *codigo){
 int getPIDdsreader(){
   FILE *arq;
   char pidString[10];
-  char aux='0';
+  char aux=' ';
   int i=0;
   pid_t pid;
 
@@ -167,14 +202,19 @@ int getPIDdsreader(){
     fprintf(stderr, "Erro ao abrir tmp.txt");
     exit(-1);
   }
-  if(fgetc(arq)==' '){
-    while(aux!=' ' && !feof(arq)){
-      aux=fgetc(arq);
-      pidString[i]=aux;
-      i++;
-    }
-    pidString[i-1]=0;
+  
+  while(aux==' '){
+    aux=fgetc(arq);
   }
+
+  
+  while(aux!=' ' && !feof(arq)){
+    pidString[i]=aux; 
+    aux=fgetc(arq);
+    i++;
+  }
+  pidString[i]=0;
+
   pid=atoi(pidString);
   fclose(arq);
 
